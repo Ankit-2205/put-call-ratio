@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Option Chain Data</title>
+    <!-- Add Bootstrap CSS link -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <!-- Add DataTables CSS link -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.10.21/css/jquery.dataTables.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+    <!-- Add DataTables JS script -->
+    <script type="text/javascript" charset="utf8" src="https://cdn.datatables.net/1.10.21/js/jquery.dataTables.min.js"></script>
+    <!-- Add Bootstrap JS and Popper.js scripts -->
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
+</head>
+<body class="bg-light">
+
+    <div class="container-fluid mt-5">
+        <!-- Current Date and Market Price Display -->
+        <div class="row mb-3">
+            <div class="col">
+                <p class="font-weight-bold">Current Date: <span id="currentDate"></span></p>
+            </div>
+            <div class="col">
+                <p class="font-weight-bold">Market Price: ₹<span id="marketPrice"></span></p>
+            </div>
+        </div>
+
+        <h1 class="jumbotron">Option Chain Data</h1>
+
+        <div class="form-group">
+            <label for="selectOption">Select Option:</label>
+            <select id="selectOption" class="form-control" onchange="updateOption(this.value)">
+                <!-- Options will be populated dynamically after API call -->
+            </select>
+        </div>
+
+        <div id="optionData" class="mt-4">
+            <!-- DataTable will be added dynamically -->
+        </div>
+    </div>
+
+    <script>
+        var oldData = {}; // Store old PE and CE strike prices
+
+        function fetchOptionChainData() {
+            $.ajax({
+                url: 'http://localhost:8080/api/v1/option-chains',
+                type: 'GET',
+                success: function(response) {
+                    var selectOption = $('#selectOption');
+                    selectOption.empty();
+
+                    // Sort the keys in date order
+                    var sortedKeys = Object.keys(response.optionchain).sort(function(a, b) {
+                        return new Date(a) - new Date(b);
+                    });
+
+                    // Populate select options
+                    $.each(sortedKeys, function(index, key) {
+                        selectOption.append($('<option></option>').attr('value', key).text(key));
+                    });
+
+                    // Update current date and market price
+                    $('#currentDate').text(new Date().toLocaleDateString());
+                    $('#marketPrice').text(response.marketValue);
+
+                    // Update option data based on the selected option
+                    updateOption(selectOption.val());
+                },
+                error: function(error) {
+                    console.error('Error fetching data:', error);
+                }
+            });
+        }
+
+        function updateOption(selectedOption) {
+            $.ajax({
+                url: 'http://localhost:8080/api/v1/option-chains',
+                type: 'GET',
+                success: function(response) {
+                    var optionData = response.optionchain[selectedOption];
+
+                    // Check if oldData is populated
+                    if (Object.keys(oldData).length !== 0) {
+                        // Calculate and update strike price change values
+                        for (var i = 0; i < optionData.length; i++) {
+                            var record = optionData[i];
+                            var oldRecord = oldData[selectedOption][i];
+
+                            // Calculate PE strike price change
+                            record.PEStrikePriceChange = record.PE.strikePrice - oldRecord.PE.strikePrice;
+
+                            // Calculate CE strike price change
+                            record.CEStrikePriceChange = record.CE.strikePrice - oldRecord.CE.strikePrice;
+                        }
+                    }
+
+                    // Update oldData with the current option data
+                    oldData[selectedOption] = optionData;
+
+                    // Create a DataTable dynamically
+                    var html = "<table id='dataTable' class='table'>";
+                    html += "<thead><tr>";
+                    html += "<th>CE Strike Price</th><th>CE Expiry Date</th><th>CE Open Interest</th><th>CE Change in Open Interest</th>";
+                    html += "<th>CE Strike Price Change</th>";
+                    html += "<th>Strike Price</th><th>Expiry Date</th>";
+                    html += "<th>PE Strike Price</th><th>PE Expiry Date</th><th>PE Open Interest</th><th>PE Change in Open Interest</th>";
+                    html += "<th>PE Strike Price Change</th>";
+                    html += "</tr></thead>";
+                    html += "<tbody>";
+
+                    var halfRowCount = Math.ceil(optionData.length / 2);
+
+                    for (var i = 0; i < optionData.length; i++) {
+                        var record = optionData[i];
+                        var isGreyBackground = i < halfRowCount;
+
+                        // Add a CSS class based on the row index
+                        var rowClass = isGreyBackground ? 'grey-background' : '';
+
+                        html += "<tr class='" + rowClass + "'>";
+                        // CE Data
+                        html += "<td>" + record.CE.strikePrice + "</td>";
+                        html += "<td>" + record.CE.expiryDate + "</td>";
+                        html += "<td>" + record.CE.openInterest + "</td>";
+                        html += "<td>" + record.CE.changeinOpenInterest + "</td>";
+                        html += "<td>" + (record.CEStrikePriceChange ? record.CEStrikePriceChange : 0) + "</td>";
+                        // Strike Price and Expiry Date
+                        html += "<td>" + record.strikePrice + "</td>";
+                        html += "<td>" + record.expiryDate + "</td>";
+                        // PE Data
+                        html += "<td>" + record.PE.strikePrice + "</td>";
+                        html += "<td>" + record.PE.expiryDate + "</td>";
+                        html += "<td>" + record.PE.openInterest + "</td>";
+                        html += "<td>" + record.PE.changeinOpenInterest + "</td>";
+                        html += "<td>" + (record.PEStrikePriceChange ? record.PEStrikePriceChange : 0) + "</td>";
+                        html += "</tr>";
+                    }
+
+                    html += "</tbody>";
+                    html += "</table>";
+
+                    $('#optionData').html(html);
+
+                    // Initialize DataTable
+                    $('#dataTable').DataTable();
+                },
+                error: function(error) {
+                    console.error('Error fetching data:', error);
+                }
+            });
+        }
+
+        // Fetch data initially and set interval for automatic refresh
+        fetchOptionChainData();
+        setInterval(fetchOptionChainData, 60000); // 1 minute interval
+    </script>
+
+    <style>
+        /* Define the grey background color for the rows with the 'grey-background' class */
+        .grey-background {
+            background-color: #f2f2f2 !important;
+        }
+    </style>
+
+</body>
+</html>
